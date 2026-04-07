@@ -1216,6 +1216,12 @@ def msgraph_send_mail():
     return jsonify(result), 201
 
 
+@app.route('/')
+def root():
+    """Health check endpoint."""
+    return jsonify({"status": "ok", "app": "Calendar & Tasks API"})
+
+
 if __name__ == '__main__':
     init_db()
-    app.run(debug=True, port=5000)
+    app.run(debug=False, port=5000, host='127.0.0.1')
