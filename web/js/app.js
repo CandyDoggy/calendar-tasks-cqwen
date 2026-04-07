@@ -150,6 +150,12 @@ class App {
     async init() {
         this._loadTheme();
         this._loadGoogleState();
+
+        /* Wait for DOM to be fully parsed */
+        if (document.readyState === 'loading') {
+            await new Promise(r => document.addEventListener('DOMContentLoaded', r));
+        }
+
         this._bindGlobal();
         this._renderUserArea();
         this._renderMiniCalendar();
@@ -311,6 +317,16 @@ class App {
         const btnSendMail = $('#btn-send-mail');
         if (btnSendMail) btnSendMail.addEventListener('click', () => this._sendMail());
 
+        /* Integration buttons */
+        const intGoogle = $('#int-google');
+        if (intGoogle) intGoogle.addEventListener('click', () => this.connectGoogle());
+        const intMs = $('#int-microsoft');
+        if (intMs) intMs.addEventListener('click', () => this.connectMicrosoft());
+        const syncGcal = $('#sync-gcal');
+        if (syncGcal) syncGcal.addEventListener('click', () => this.syncGoogleCalendar());
+        const syncOutlook = $('#sync-outlook');
+        if (syncOutlook) syncOutlook.addEventListener('click', () => this.syncOutlookCalendar());
+
         /* Auth */
         const emailForm = $('#email-auth-form');
         if (emailForm) emailForm.addEventListener('submit', e => this._handleEmailAuth(e));
@@ -380,7 +396,18 @@ class App {
     }
 
     async _handleGoogleOAuth() {
-        if (!this.token) { toast('Sign in with email first, then connect Google', 'info'); return; }
+        /* Use the same flow as connectGoogle() - no email auth required */
+        if (this.googleConnected) {
+            if (!confirm('Disconnect Google account?')) return;
+            localStorage.removeItem('ct-google-token');
+            localStorage.removeItem('ct-google-user');
+            this.googleConnected = false;
+            this.googleUser = null;
+            this.googleToken = null;
+            this._renderIntegrations();
+            toast('Google disconnected', 'info');
+            return;
+        }
         try {
             const oauth2 = new google.accounts.oauth2.TokenClient({
                 client_id: GOOGLE_CLIENT_ID,
