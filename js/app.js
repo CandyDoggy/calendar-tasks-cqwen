@@ -427,18 +427,28 @@ class App {
 
     async _saveGoogleToken(accessToken) {
         try {
-            // Get user info from Google
             const resp = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
                 headers: { 'Authorization': `Bearer ${accessToken}` }
             });
             const user = await resp.json();
-            // Save to local storage for the web app
             localStorage.setItem('ct-google-token', accessToken);
             localStorage.setItem('ct-google-user', JSON.stringify({ email: user.email, name: user.name }));
             this.googleConnected = true;
             this.googleUser = user;
+            this.googleToken = accessToken;
             this._renderIntegrations();
             toast(`Connected to Google as ${user.email}`, 'success');
+            /* Try to create local user session if not logged in */
+            if (!this.token) {
+                try {
+                    const regData = await this.api.post('/auth/register', {
+                        email: user.email,
+                        password: 'google-' + Date.now()
+                    });
+                    this._setSession(regData);
+                    await this._loadAll();
+                } catch {}
+            }
         } catch (err) { toast('Failed to save Google token: ' + err.message, 'error'); }
     }
 
@@ -698,8 +708,6 @@ class App {
     }
 
     async _saveEvent() {
-        if (!this.token) { toast('Sign in to create events', 'error'); return; }
-
         const title = $('#event-title')?.value.trim();
         if (!title) { toast('Event title is required', 'error'); return; }
 
@@ -726,14 +734,27 @@ class App {
 
         try {
             if (this.editingEventId) {
-                await this.api.put(`/events/${this.editingEventId}`, data);
+                /* Update local event */
+                const idx = this.events.findIndex(e => e.id === this.editingEventId);
+                if (idx >= 0) {
+                    this.events[idx] = { ...this.events[idx], ...data, id: this.editingEventId };
+                }
+                /* Try API if logged in */
+                if (this.token) {
+                    try { await this.api.put(`/events/${this.editingEventId}`, data); } catch {}
+                }
                 toast('Event updated', 'success');
             } else {
-                await this.api.post('/events', data);
+                const newEvent = { ...data, id: Date.now() };
+                this.events.push(newEvent);
+                /* Try API if logged in */
+                if (this.token) {
+                    try { await this.api.post('/events', data); } catch {}
+                }
                 toast('Event created', 'success');
             }
             this._hideModal('modal-event');
-            await this._loadAll();
+            this._renderCalendar();
         } catch (err) {
             toast('Failed to save event: ' + err.message, 'error');
         }
@@ -743,10 +764,15 @@ class App {
         if (!this.editingEventId) return;
         if (!confirm('Delete this event?')) return;
         try {
-            await this.api.delete(`/events/${this.editingEventId}`);
+            /* Remove locally */
+            this.events = this.events.filter(e => e.id !== this.editingEventId);
+            /* Try API if logged in */
+            if (this.token) {
+                try { await this.api.delete(`/events/${this.editingEventId}`); } catch {}
+            }
             toast('Event deleted', 'success');
             this._hideModal('modal-event');
-            await this._loadAll();
+            this._renderCalendar();
         } catch (err) {
             toast('Failed to delete event: ' + err.message, 'error');
         }
@@ -760,11 +786,12 @@ class App {
             { divider: true },
             { label: 'Delete', danger: true, action: async () => {
                 if (!confirm('Delete this event?')) return;
-                try {
-                    await this.api.delete(`/events/${eventId}`);
-                    toast('Event deleted', 'success');
-                    await this._loadAll();
-                } catch (err) { toast('Failed: ' + err.message, 'error'); }
+                this.events = this.events.filter(ev => ev.id !== eventId);
+                if (this.token) {
+                    try { await this.api.delete(`/events/${eventId}`); } catch {}
+                }
+                toast('Event deleted', 'success');
+                this._renderCalendar();
             }}
         ]);
     }
@@ -877,8 +904,6 @@ class App {
     }
 
     async _saveTask() {
-        if (!this.token) { toast('Sign in to create tasks', 'error'); return; }
-
         const title = $('#task-title')?.value.trim();
         if (!title) { toast('Task title is required', 'error'); return; }
 
@@ -887,23 +912,32 @@ class App {
             description: $('#task-description')?.value.trim() || '',
             due_date:    $('#task-due')?.value || null,
             priority:    parseInt($('#task-priority')?.value || '1', 10),
-            category:    $('#task-category')?.value.trim() || ''
+            category:    $('#task-category')?.value.trim() || '',
+            status:      'pending'
         };
 
         try {
             if (this.editingTaskId) {
-                await this.api.put(`/tasks/${this.editingTaskId}`, data);
+                /* Update local task */
+                const idx = this.tasks.findIndex(x => x.id === this.editingTaskId);
+                if (idx >= 0) {
+                    this.tasks[idx] = { ...this.tasks[idx], ...data, id: this.editingTaskId };
+                }
+                /* Try API if logged in */
+                if (this.token) {
+                    await this.api.put(`/tasks/${this.editingTaskId}`, data);
+                }
                 toast('Task updated', 'success');
             } else {
-                data.status = 'pending';
-                await this.api.post('/tasks', data);
+                const newTask = { ...data, id: Date.now() };
+                this.tasks.push(newTask);
+                /* Try API if logged in */
+                if (this.token) {
+                    try { await this.api.post('/tasks', data); } catch {}
+                }
                 toast('Task created', 'success');
             }
             this._hideModal('modal-task');
-            try {
-                const res = await this.api.get('/tasks');
-                this.tasks = Array.isArray(res) ? res : [];
-            } catch {}
             this._renderTasks();
         } catch (err) {
             toast('Failed to save task: ' + err.message, 'error');
@@ -913,14 +947,11 @@ class App {
     async _toggleTask(taskId) {
         const t = this.tasks.find(x => x.id === taskId);
         if (!t) return;
-        const newStatus = t.status === 'completed' ? 'pending' : 'completed';
-        try {
-            await this.api.put(`/tasks/${taskId}`, { status: newStatus });
-            t.status = newStatus;
-            this._renderTasks();
-        } catch (err) {
-            toast('Failed: ' + err.message, 'error');
+        t.status = t.status === 'completed' ? 'pending' : 'completed';
+        if (this.token) {
+            try { await this.api.put(`/tasks/${taskId}`, { status: t.status }); } catch {}
         }
+        this._renderTasks();
     }
 
     async _deleteTask() {
@@ -935,17 +966,12 @@ class App {
 
     async _doDeleteTask(taskId) {
         if (!confirm('Delete this task?')) return;
-        try {
-            await this.api.delete(`/tasks/${taskId}`);
-            toast('Task deleted', 'success');
-            try {
-                const res = await this.api.get('/tasks');
-                this.tasks = Array.isArray(res) ? res : [];
-            } catch {}
-            this._renderTasks();
-        } catch (err) {
-            toast('Failed to delete task: ' + err.message, 'error');
+        this.tasks = this.tasks.filter(t => t.id !== taskId);
+        if (this.token) {
+            try { await this.api.delete(`/tasks/${taskId}`); } catch {}
         }
+        toast('Task deleted', 'success');
+        this._renderTasks();
     }
 
     _taskContext(e, taskId) {
@@ -1420,14 +1446,14 @@ class App {
             const now = new Date();
             const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
             const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59).toISOString();
-            const resp = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${start}&timeMax=${end}&singleEvents=true&orderBy=startTime`, {
+            const resp = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(start)}&timeMax=${encodeURIComponent(end)}&singleEvents=true&orderBy=startTime`, {
                 headers: { 'Authorization': `Bearer ${this.googleToken}` }
             });
             const data = await resp.json();
-            if (data.error) throw new Error(data.error.message);
+            if (data.error) throw new Error(data.error.message || 'Unknown error');
             const events = data.items || [];
-            toast(`Fetched ${events.length} events from Google Calendar`, 'success');
             // Merge with local events
+            let newCount = 0;
             for (const gEvent of events) {
                 const exists = this.events.find(e => e.external_id === gEvent.id);
                 if (!exists) {
@@ -1443,10 +1469,22 @@ class App {
                         external_id: gEvent.id
                     };
                     this.events.push(ev);
+                    newCount++;
                 }
             }
+            toast(`Fetched ${events.length} events, ${newCount} new`, 'success');
             this._renderCalendar();
-        } catch (err) { toast('Sync failed: ' + err.message, 'error'); }
+        } catch (err) {
+            const msg = err.message || 'Unknown error';
+            if (msg.includes('access') || msg.includes('invalid')) {
+                toast('Google token expired. Reconnect Google.', 'error');
+                this.googleConnected = false;
+                this.googleToken = null;
+                this._renderIntegrations();
+            } else {
+                toast('Sync failed: ' + msg, 'error');
+            }
+        }
     }
 
     async syncOutlookCalendar() {
