@@ -22,6 +22,147 @@ CORS(app)
 jwt = JWTManager(app)
 
 
+# ==================== OAUTH HTML PAGES ====================
+
+def _oauth_success_page(display_name, email, provider):
+    """Return an HTML success page that auto-closes after 2 seconds."""
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connection Successful</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+        }}
+        .container {{
+            text-align: center;
+            background: rgba(255,255,255,0.15);
+            backdrop-filter: blur(10px);
+            padding: 60px 80px;
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        }}
+        .checkmark {{
+            font-size: 72px;
+            margin-bottom: 20px;
+            animation: pop 0.5s ease-out;
+        }}
+        @keyframes pop {{
+            0% {{ transform: scale(0); }}
+            80% {{ transform: scale(1.1); }}
+            100% {{ transform: scale(1); }}
+        }}
+        h1 {{ font-size: 28px; margin-bottom: 10px; font-weight: 600; }}
+        p {{ font-size: 16px; opacity: 0.9; margin-bottom: 8px; }}
+        .email {{ font-weight: 600; font-size: 18px; margin-top: 12px; }}
+        .close-msg {{ font-size: 13px; opacity: 0.7; margin-top: 20px; }}
+        .progress {{
+            width: 200px;
+            height: 4px;
+            background: rgba(255,255,255,0.3);
+            border-radius: 2px;
+            margin: 20px auto 0;
+            overflow: hidden;
+        }}
+        .progress-bar {{
+            height: 100%;
+            background: #fff;
+            border-radius: 2px;
+            animation: shrink 2s linear forwards;
+        }}
+        @keyframes shrink {{
+            from {{ width: 100%; }}
+            to {{ width: 0%; }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="checkmark">&#10003;</div>
+        <h1>Successfully Connected!</h1>
+        <p>Connected to {provider}</p>
+        <p class="email">{display_name} ({email})</p>
+        <p class="close-msg">This window will close automatically...</p>
+        <div class="progress"><div class="progress-bar"></div></div>
+    </div>
+    <script>
+        setTimeout(function() {{
+            window.close();
+            // Fallback if window.close() is blocked
+            document.querySelector('.close-msg').textContent = 'You can close this tab now.';
+        }}, 2000);
+    </script>
+</body>
+</html>"""
+    return html, 200, {'Content-Type': 'text/html; charset=utf-8'}
+
+
+def _oauth_error_page(error_code, description):
+    """Return an HTML error page for OAuth failures."""
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connection Failed</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #f87171 0%, #dc2626 100%);
+            color: #fff;
+        }}
+        .container {{
+            text-align: center;
+            background: rgba(255,255,255,0.15);
+            backdrop-filter: blur(10px);
+            padding: 60px 80px;
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        }}
+        .icon {{ font-size: 72px; margin-bottom: 20px; }}
+        h1 {{ font-size: 28px; margin-bottom: 10px; }}
+        p {{ font-size: 14px; opacity: 0.9; max-width: 400px; margin: 0 auto; word-wrap: break-word; }}
+        .retry {{
+            display: inline-block;
+            margin-top: 20px;
+            padding: 10px 24px;
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.4);
+            border-radius: 8px;
+            color: #fff;
+            text-decoration: none;
+            font-size: 14px;
+        }}
+        .retry:hover {{ background: rgba(255,255,255,0.3); }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">&#10060;</div>
+        <h1>Connection Failed</h1>
+        <p><strong>Error:</strong> {error_code}</p>
+        <p>{description}</p>
+        <a class="retry" href="javascript:window.close()">Close this window</a>
+    </div>
+</body>
+</html>"""
+    return html, 400, {'Content-Type': 'text/html; charset=utf-8'}
+
+
 # ==================== AUTH ====================
 
 @app.route('/api/auth/register', methods=['POST'])
@@ -455,7 +596,7 @@ def google_callback():
     """
     Handle Google OAuth callback.
     POST: Receive code from frontend
-    GET: Direct callback from Google (redirects to frontend)
+    GET: Direct callback from Google (shows success HTML page with auto-close)
     """
     if request.method == 'POST':
         data = request.get_json()
@@ -505,20 +646,47 @@ def google_callback():
             })
 
     else:
-        # GET request - redirect to frontend with code
+        # GET request - direct callback from Google's OAuth redirect
         code = request.args.get('code')
-        state = request.args.get('state')
         error = request.args.get('error')
 
-        frontend_url = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
-
         if error:
-            return redirect(f'{frontend_url}/auth/google/callback?error={error}')
+            return _oauth_error_page(error, request.args.get('error_description', ''))
 
-        if code:
-            return redirect(f'{frontend_url}/auth/google/callback?code={code}&state={state or ""}')
+        if not code:
+            return _oauth_error_page('no_code', 'No authorization code received')
 
-        return redirect(f'{frontend_url}/auth/google/callback?error=no_code')
+        # Exchange the code and save
+        state = request.args.get('state', '')
+        from integrations.google_integration import handle_oauth_callback
+        result = handle_oauth_callback(code, state)
+
+        if 'error' in result:
+            return _oauth_error_page('callback_error', result['error'])
+
+        credentials = result['credentials']
+        email = result['email']
+        display_name = result['display_name']
+
+        with get_connection() as conn:
+            user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+            if not user:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """INSERT INTO users (email, display_name, auth_provider)
+                       VALUES (?, ?, 'google')""",
+                    (email, display_name)
+                )
+                user_id = cursor.lastrowid
+                cursor.execute("INSERT INTO settings (user_id) VALUES (?)", (user_id,))
+            else:
+                user_id = user['id']
+
+            from integrations.google_integration import _save_user_google_tokens
+            _save_user_google_tokens(user_id, credentials)
+
+        # Return success HTML page with auto-close
+        return _oauth_success_page(display_name, email, 'Google')
 
 
 @app.route('/api/integrations/google/disconnect', methods=['POST'])
@@ -768,7 +936,7 @@ def microsoft_callback():
     """
     Handle Microsoft OAuth2 callback.
     POST: Receive code from frontend
-    GET: Direct callback from Microsoft (redirects to frontend)
+    GET: Direct callback from Microsoft (shows success HTML page with auto-close)
     """
     if request.method == 'POST':
         data = request.get_json()
@@ -818,20 +986,47 @@ def microsoft_callback():
             })
 
     else:
-        # GET request - redirect to frontend with code
+        # GET request - direct callback from Microsoft's OAuth redirect
         code = request.args.get('code')
-        state = request.args.get('state')
         error = request.args.get('error')
 
-        frontend_url = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
-
         if error:
-            return redirect(f'{frontend_url}/auth/microsoft/callback?error={error}')
+            return _oauth_error_page(error, request.args.get('error_description', ''))
 
-        if code:
-            return redirect(f'{frontend_url}/auth/microsoft/callback?code={code}&state={state or ""}')
+        if not code:
+            return _oauth_error_page('no_code', 'No authorization code received')
 
-        return redirect(f'{frontend_url}/auth/microsoft/callback?error=no_code')
+        # Exchange the code and save
+        state = request.args.get('state', '')
+        from integrations.ms_integration import handle_oauth_callback
+        result = handle_oauth_callback(code, state)
+
+        if 'error' in result:
+            return _oauth_error_page('callback_error', result['error'])
+
+        token_data = result['token_data']
+        email = result['email']
+        display_name = result['display_name']
+
+        with get_connection() as conn:
+            user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+            if not user:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """INSERT INTO users (email, display_name, auth_provider)
+                       VALUES (?, ?, 'microsoft')""",
+                    (email, display_name)
+                )
+                user_id = cursor.lastrowid
+                cursor.execute("INSERT INTO settings (user_id) VALUES (?)", (user_id,))
+            else:
+                user_id = user['id']
+
+            from integrations.ms_integration import _save_user_ms_tokens
+            _save_user_ms_tokens(user_id, token_data)
+
+        # Return success HTML page with auto-close
+        return _oauth_success_page(display_name, email, 'Microsoft')
 
 
 @app.route('/api/integrations/microsoft/disconnect', methods=['POST'])

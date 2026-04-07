@@ -126,6 +126,13 @@ def _get_ms_account_from_token(token_data):
 
 def generate_oauth_url():
     """Generate Microsoft OAuth2 authorization URL."""
+    # Validate credentials before attempting OAuth
+    if 'YOUR_MICROSOFT' in config.MICROSOFT_CLIENT_ID or 'YOUR_MICROSOFT' in config.MICROSOFT_CLIENT_SECRET:
+        return {
+            'error': 'Microsoft OAuth credentials not configured. '
+                     'Please add your credentials to desktop/config.json.'
+        }
+
     try:
         app = _build_msal_app()
 

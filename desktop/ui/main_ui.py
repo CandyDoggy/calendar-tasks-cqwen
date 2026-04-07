@@ -322,9 +322,10 @@ class CalendarTasksUI(ctk.CTk):
 
     def _render_user_section(self, parent):
         """Clear and rebuild the bottom user area."""
-        # Remove existing user-related widgets (last children)
-        for w in parent.winfo_children()[-6:]:
-            w.destroy()
+        # Remove existing user-related widgets (identified by _user_widget tag)
+        for w in parent.winfo_children():
+            if hasattr(w, '_user_widget') and w._user_widget:
+                w.destroy()
 
         theme = THEMES[self.current_theme]
 
@@ -332,22 +333,26 @@ class CalendarTasksUI(ctk.CTk):
             name = self.current_user.get("display_name", self.current_user.get("email", "User"))
             provider = self.current_user.get("auth_provider", "local")
             provider_icon = {"google": "\U0001f535", "microsoft": "\U0001fa9f"}.get(provider, "\U0001f511")
-            ctk.CTkLabel(
+            lbl = ctk.CTkLabel(
                 parent,
                 text=f"{provider_icon}  {name}",
                 font=ctk.CTkFont(size=13, weight="bold"),
                 text_color=theme["text"],
                 wraplength=190,
-            ).pack(padx=15, anchor="w", pady=(5, 2))
+            )
+            lbl._user_widget = True
+            lbl.pack(padx=15, anchor="w", pady=(5, 2))
             email = self.current_user.get("email", "")
-            ctk.CTkLabel(
+            lbl2 = ctk.CTkLabel(
                 parent,
                 text=email,
                 font=ctk.CTkFont(size=10),
                 text_color=theme["text_secondary"],
                 wraplength=190,
-            ).pack(padx=15, anchor="w")
-            ctk.CTkButton(
+            )
+            lbl2._user_widget = True
+            lbl2.pack(padx=15, anchor="w")
+            btn = ctk.CTkButton(
                 parent,
                 text="Logout",
                 height=28,
@@ -355,89 +360,106 @@ class CalendarTasksUI(ctk.CTk):
                 hover_color=theme["button_hover"],
                 text_color=theme["text"],
                 command=self._logout,
-            ).pack(fill="x", padx=15, pady=(8, 5))
+            )
+            btn._user_widget = True
+            btn.pack(fill="x", padx=15, pady=(8, 5))
         else:
-            ctk.CTkButton(
+            btn = ctk.CTkButton(
                 parent,
                 text="\U0001f511  Sign In",
                 height=32,
                 command=self._show_login_dialog,
-            ).pack(fill="x", padx=15, pady=5)
+            )
+            btn._user_widget = True
+            btn.pack(fill="x", padx=15, pady=5)
 
     def _create_integration_section(self, parent):
-        """Google / Microsoft connect buttons with status."""
+        """Google / Microsoft link buttons with status."""
         theme = THEMES[self.current_theme]
-        frame = ctk.CTkFrame(parent, fg_color="transparent")
-        frame.pack(fill="x", padx=12, pady=2)
 
-        self.google_status_label = ctk.CTkLabel(
-            frame, text="Google: Not connected", font=ctk.CTkFont(size=10),
-            text_color=theme["text_secondary"], anchor="w",
-        )
-        self.google_status_label.pack(fill="x", pady=(0, 2))
+        # Section label
+        ctk.CTkLabel(
+            parent, text="Integrations", font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=theme["text_secondary"],
+        ).pack(padx=15, anchor="w", pady=(10, 4))
 
         self.google_connect_btn = ctk.CTkButton(
-            frame, text="Connect Google", height=24, font=ctk.CTkFont(size=10),
+            parent, text="Link Google Account", height=30, font=ctk.CTkFont(size=12),
             fg_color="#4285f4", hover_color="#5a9cf5", text_color="#fff",
-            command=self._connect_google,
+            corner_radius=8, command=self._connect_google,
         )
-        self.google_connect_btn.pack(fill="x", pady=1)
-
-        self.ms_status_label = ctk.CTkLabel(
-            frame, text="Microsoft: Not connected", font=ctk.CTkFont(size=10),
-            text_color=theme["text_secondary"], anchor="w",
-        )
-        self.ms_status_label.pack(fill="x", pady=(6, 2))
+        self.google_connect_btn.pack(fill="x", padx=12, pady=1)
 
         self.ms_connect_btn = ctk.CTkButton(
-            frame, text="Connect Microsoft", height=24, font=ctk.CTkFont(size=10),
+            parent, text="Link Microsoft Account", height=30, font=ctk.CTkFont(size=12),
             fg_color="#0078d4", hover_color="#106ebe", text_color="#fff",
-            command=self._connect_microsoft,
+            corner_radius=8, command=self._connect_microsoft,
         )
-        self.ms_connect_btn.pack(fill="x", pady=1)
+        self.ms_connect_btn.pack(fill="x", padx=12, pady=1)
 
         # Sync buttons (hidden until connected)
         self.sync_frame = ctk.CTkFrame(parent, fg_color="transparent")
         self.sync_frame.pack(fill="x", padx=12, pady=(6, 2))
+        self.sync_frame.pack_forget()  # hidden by default
 
         self.google_sync_btn = ctk.CTkButton(
-            self.sync_frame, text="\U0001f504 Sync Google Calendar", height=24, font=ctk.CTkFont(size=10),
+            self.sync_frame, text="Sync Google Calendar", height=24, font=ctk.CTkFont(size=10),
             command=self._sync_google_calendar,
         )
         self.google_sync_btn.pack(fill="x", pady=1)
 
         self.ms_sync_btn = ctk.CTkButton(
-            self.sync_frame, text="\U0001f504 Sync Outlook Calendar", height=24, font=ctk.CTkFont(size=10),
+            self.sync_frame, text="Sync Outlook Calendar", height=24, font=ctk.CTkFont(size=10),
             command=self._sync_microsoft_calendar,
         )
         self.ms_sync_btn.pack(fill="x", pady=1)
 
-        self.sync_frame.pack_forget()  # hidden by default
         self._check_integration_status()
 
     def _check_integration_status(self):
-        """Check and display integration connection status."""
-        if not self.api.token:
-            return
+        """Check and update integration button labels based on connection status."""
+        theme = THEMES[self.current_theme]
         # Google
         result = self.api.get("api/integrations/google/status")
         if result.get("connected"):
-            self.google_status_label.configure(text="Google: Connected", text_color="#4ade80")
-            self.google_connect_btn.configure(text="Disconnect Google", command=self._disconnect_google)
+            # Try to get email from user record
+            email = ""
+            if self.current_user:
+                email = self.current_user.get("email", "")
+            self.google_connect_btn.configure(
+                text=f"Google ({email})" if email else "Google Connected",
+                fg_color="#22c55e", hover_color="#16a34a",
+                command=self._disconnect_google,
+            )
             self.sync_frame.pack(fill="x", padx=12, pady=(6, 2))
         else:
-            self.google_status_label.configure(text="Google: Not connected", text_color=THEMES[self.current_theme]["text_secondary"])
-            self.google_connect_btn.configure(text="Connect Google", command=self._connect_google)
+            self.google_connect_btn.configure(
+                text="Link Google Account",
+                fg_color="#4285f4", hover_color="#5a9cf5",
+                command=self._connect_google,
+            )
+            # Check if any sync frame children exist before packing
+            if not self.sync_frame.winfo_children():
+                pass  # no sync needed
 
         # Microsoft
         result = self.api.get("api/integrations/microsoft/status")
         if result.get("connected"):
-            self.ms_status_label.configure(text="Microsoft: Connected", text_color="#4ade80")
-            self.ms_connect_btn.configure(text="Disconnect Microsoft", command=self._disconnect_microsoft)
+            email = ""
+            if self.current_user:
+                email = self.current_user.get("email", "")
+            self.ms_connect_btn.configure(
+                text=f"Microsoft ({email})" if email else "Microsoft Connected",
+                fg_color="#22c55e", hover_color="#16a34a",
+                command=self._disconnect_microsoft,
+            )
             self.sync_frame.pack(fill="x", padx=12, pady=(6, 2))
         else:
-            self.ms_status_label.configure(text="Microsoft: Not connected", text_color=THEMES[self.current_theme]["text_secondary"])
-            self.ms_connect_btn.configure(text="Connect Microsoft", command=self._connect_microsoft)
+            self.ms_connect_btn.configure(
+                text="Link Microsoft Account",
+                fg_color="#0078d4", hover_color="#106ebe",
+                command=self._connect_microsoft,
+            )
 
     # ------------------------------------------------------------------
     # Mini calendar
@@ -547,7 +569,10 @@ class CalendarTasksUI(ctk.CTk):
         dialog.geometry("400x520")
         dialog.resizable(False, False)
         dialog.transient(self)
-        dialog.grab_set()
+        try:
+            dialog.grab_set()
+        except tk.TclError:
+            pass
         dialog.configure(fg_color=THEMES[self.current_theme]["card"])
 
         theme = THEMES[self.current_theme]
@@ -666,55 +691,84 @@ class CalendarTasksUI(ctk.CTk):
         ).pack(fill="x", padx=40, pady=4)
 
     def _show_oauth_polling_dialog(self, provider):
-        """Show a dialog that polls for OAuth callback completion."""
+        """Show a non-blocking dialog that polls for OAuth completion."""
         dialog = ctk.CTkToplevel(self)
-        dialog.title(f"Completing {provider.title()} sign-in")
+        dialog.title(f"Linking {provider.title()} Account")
         dialog.geometry("360x160")
         dialog.resizable(False, False)
         dialog.transient(self)
-        dialog.grab_set()
+        # No grab_set -- non-blocking
         theme = THEMES[self.current_theme]
 
-        ctk.CTkLabel(dialog, text="Please complete sign-in in your browser,\nthen click the button below.", font=ctk.CTkFont(size=13), text_color=theme["text"]).pack(pady=(20, 10))
+        x = self.winfo_x() + (self.winfo_width() - 360) // 2
+        y = self.winfo_y() + (self.winfo_height() - 160) // 2
+        dialog.geometry(f"360x160+{x}+{y}")
+        dialog.configure(fg_color=theme["card"])
+
+        ctk.CTkLabel(
+            dialog,
+            text=f"Please complete sign-in in your browser.\nClose this dialog when done.",
+            font=ctk.CTkFont(size=13), text_color=theme["text"],
+        ).pack(pady=(15, 10))
 
         status_label = ctk.CTkLabel(dialog, text="", font=ctk.CTkFont(size=11), text_color=theme["text_secondary"])
         status_label.pack()
 
-        def check_callback():
-            # After user completes browser auth, they may have been redirected to the server.
-            # We check integration status to see if tokens were saved.
+        def check_done():
+            status_label.configure(text="Checking connection...", text_color=theme["text_secondary"])
+            dialog.update()
             result = self.api.get(f"api/integrations/{provider}/status")
             if result.get("connected"):
                 dialog.destroy()
-                # Now login with the provider-created account
-                # We need to get the user info - fetch events to verify token
-                events = self.api.get("api/events")
-                if "error" not in events or self.api.token:
-                    # Token still valid from callback - get user info
-                    self._refresh_user_info()
-                    self._setup_ui()
-                    self._fetch_all_data()
-                    return
-            status_label.configure(text="Not yet connected. Try again after completing browser sign-in.")
-            ctk.CTkButton(dialog, text="Check Again", command=check_callback, height=30).pack(pady=8)
+                self._check_integration_status()
+                self._render_user_section(self.main_frame.winfo_children()[0])
+                self._fetch_all_data()
+                return
+            status_label.configure(text="Not yet connected. Complete sign-in in your browser, then click Check again.",
+                                   text_color=theme["text_secondary"])
 
-        ctk.CTkButton(dialog, text="I've signed in in the browser", command=check_callback, height=36).pack(pady=10)
+        ctk.CTkButton(dialog, text="Check Connection", command=check_done, height=32, corner_radius=8).pack(pady=8)
+        ctk.CTkButton(dialog, text="Close", command=dialog.destroy, height=26, corner_radius=8,
+                      fg_color="transparent", hover_color=theme["button_hover"],
+                      text_color=theme["text_secondary"]).pack(pady=(0, 4))
 
-    def _refresh_user_info(self):
-        """Refresh current user info from the API using the current token."""
-        # The API doesn't have a /me endpoint, so we use events as a ping.
-        # User info was set during the OAuth callback response.
+    def _show_oauth_setup_dialog(self):
+        """Deprecated -- kept for backwards compatibility."""
         pass
 
-    def _logout(self):
-        self.api.token = None
-        self.current_user = None
-        self.events = []
-        self.tasks = []
-        self.notes = []
-        self.mail_messages = []
-        self._save_session()
-        self._setup_ui()
+    def _connect_google(self):
+        """Connect or disconnect Google account."""
+        result = self.api.get("api/integrations/google/status")
+        if result.get("connected"):
+            if messagebox.askyesno("Disconnect Google", "Disconnect your Google account?"):
+                self.api.post("api/integrations/google/disconnect")
+                self._check_integration_status()
+                self._render_user_section(self.main_frame.winfo_children()[0])
+            return
+
+        auth_result = self.api.get("api/integrations/google/auth-url")
+        if "error" in auth_result:
+            messagebox.showerror("Error", auth_result["error"])
+            return
+        webbrowser.open(auth_result["authorization_url"])
+        self._show_oauth_polling_dialog("google")
+
+    def _connect_microsoft(self):
+        """Connect or disconnect Microsoft account."""
+        result = self.api.get("api/integrations/microsoft/status")
+        if result.get("connected"):
+            if messagebox.askyesno("Disconnect Microsoft", "Disconnect your Microsoft account?"):
+                self.api.post("api/integrations/microsoft/disconnect")
+                self._check_integration_status()
+                self._render_user_section(self.main_frame.winfo_children()[0])
+            return
+
+        auth_result = self.api.get("api/integrations/microsoft/auth-url")
+        if "error" in auth_result:
+            messagebox.showerror("Error", auth_result["error"])
+            return
+        webbrowser.open(auth_result["authorization_url"])
+        self._show_oauth_polling_dialog("microsoft")
 
     # ==================================================================
     # Calendar View
@@ -905,7 +959,10 @@ class CalendarTasksUI(ctk.CTk):
         dialog.geometry("480x580")
         dialog.resizable(False, False)
         dialog.transient(self)
-        dialog.grab_set()
+        try:
+            dialog.grab_set()
+        except tk.TclError:
+            pass
         theme = THEMES[self.current_theme]
 
         dialog.update_idletasks()
@@ -1243,7 +1300,10 @@ class CalendarTasksUI(ctk.CTk):
         dialog.geometry("440x480")
         dialog.resizable(False, False)
         dialog.transient(self)
-        dialog.grab_set()
+        try:
+            dialog.grab_set()
+        except tk.TclError:
+            pass
         theme = THEMES[self.current_theme]
 
         dialog.update_idletasks()
@@ -1477,7 +1537,10 @@ class CalendarTasksUI(ctk.CTk):
         dialog.geometry("280x120")
         dialog.resizable(False, False)
         dialog.transient(self)
-        dialog.grab_set()
+        try:
+            dialog.grab_set()
+        except tk.TclError:
+            pass
         theme = THEMES[self.current_theme]
 
         ctk.CTkLabel(dialog, text="Choose color:", font=ctk.CTkFont(size=13), text_color=theme["text"]).pack(pady=(10, 8))
@@ -1505,7 +1568,10 @@ class CalendarTasksUI(ctk.CTk):
         dialog.geometry("420x400")
         dialog.resizable(False, False)
         dialog.transient(self)
-        dialog.grab_set()
+        try:
+            dialog.grab_set()
+        except tk.TclError:
+            pass
         theme = THEMES[self.current_theme]
 
         dialog.update_idletasks()
@@ -1759,7 +1825,10 @@ class CalendarTasksUI(ctk.CTk):
         dialog.geometry("600x500")
         dialog.resizable(True, True)
         dialog.transient(self)
-        dialog.grab_set()
+        try:
+            dialog.grab_set()
+        except tk.TclError:
+            pass
         theme = THEMES[self.current_theme]
 
         dialog.update_idletasks()
@@ -1796,47 +1865,7 @@ class CalendarTasksUI(ctk.CTk):
     # Integration actions
     # ==================================================================
 
-    def _connect_google(self):
-        """Connect or disconnect Google account."""
-        # Check current status
-        result = self.api.get("api/integrations/google/status")
-        if result.get("connected"):
-            # Disconnect
-            if messagebox.askyesno("Disconnect Google", "Disconnect your Google account?"):
-                self.api.post("api/integrations/google/disconnect")
-                self._check_integration_status()
-                self._render_user_section(self.main_frame.winfo_children()[0])
-            return
-
-        # Connect via OAuth
-        auth_result = self.api.get("api/integrations/google/auth-url")
-        if "error" in auth_result:
-            messagebox.showerror("Error", auth_result["error"])
-            return
-        webbrowser.open(auth_result["authorization_url"])
-        messagebox.showinfo("Google Sign-In", "Please complete sign-in in your browser.\nThen click 'I've signed in' when done.")
-        # Refresh status
-        self._check_integration_status()
-        self._render_user_section(self.main_frame.winfo_children()[0])
-
-    def _connect_microsoft(self):
-        """Connect or disconnect Microsoft account."""
-        result = self.api.get("api/integrations/microsoft/status")
-        if result.get("connected"):
-            if messagebox.askyesno("Disconnect Microsoft", "Disconnect your Microsoft account?"):
-                self.api.post("api/integrations/microsoft/disconnect")
-                self._check_integration_status()
-                self._render_user_section(self.main_frame.winfo_children()[0])
-            return
-
-        auth_result = self.api.get("api/integrations/microsoft/auth-url")
-        if "error" in auth_result:
-            messagebox.showerror("Error", auth_result["error"])
-            return
-        webbrowser.open(auth_result["authorization_url"])
-        messagebox.showinfo("Microsoft Sign-In", "Please complete sign-in in your browser.\nThen click 'I've signed in' when done.")
-        self._check_integration_status()
-        self._render_user_section(self.main_frame.winfo_children()[0])
+    # _connect_google and _connect_microsoft are defined above with polling dialog
 
     def _disconnect_google(self):
         self.api.post("api/integrations/google/disconnect")

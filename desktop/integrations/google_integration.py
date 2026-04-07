@@ -161,6 +161,13 @@ def build_keep_service(user_id):
 
 def generate_oauth_url():
     """Generate Google OAuth authorization URL."""
+    # Validate credentials before attempting OAuth
+    if 'YOUR_GOOGLE' in config.GOOGLE_CLIENT_ID or 'YOUR_GOOGLE' in config.GOOGLE_CLIENT_SECRET:
+        return {
+            'error': 'Google OAuth credentials not configured. '
+                     'Please add your credentials to desktop/config.json.'
+        }
+
     try:
         flow = Flow.from_client_config(
             {
