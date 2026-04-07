@@ -1,9 +1,12 @@
 /* ================================================================
    Calendar & Tasks - Full-featured Web App (vanilla JS)
-   API base: http://localhost:5000/api
+   Version: 0.5.0
    ================================================================ */
 
 const API_BASE = 'http://localhost:5000/api';
+
+// Google Client ID for web version (client-side Sign-In)
+const GOOGLE_CLIENT_ID = '750836360288-e58b73eup05aaofk29c7290oiv715gln.apps.googleusercontent.com';
 
 /* ---- DOM helpers ---- */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -146,6 +149,7 @@ class App {
        ========================================================== */
     async init() {
         this._loadTheme();
+        this._loadGoogleState();
         this._bindGlobal();
         this._renderUserArea();
         this._renderMiniCalendar();
@@ -162,6 +166,23 @@ class App {
             this._renderNotes();
             this._renderMail();
         }
+        this._renderIntegrations();
+    }
+
+    _loadGoogleState() {
+        try {
+            const token = localStorage.getItem('ct-google-token');
+            const user = localStorage.getItem('ct-google-user');
+            if (token && user) {
+                this.googleConnected = true;
+                this.googleUser = JSON.parse(user);
+                this.googleToken = token;
+            } else {
+                this.googleConnected = false;
+                this.googleUser = null;
+                this.googleToken = null;
+            }
+        } catch { this.googleConnected = false; this.googleUser = null; }
     }
 
     /* ==========================================================
@@ -361,12 +382,37 @@ class App {
     async _handleGoogleOAuth() {
         if (!this.token) { toast('Sign in with email first, then connect Google', 'info'); return; }
         try {
-            const data = await this.api.get('/integrations/google/auth-url');
-            if (data?.url) {
-                window.open(data.url, '_blank');
-                toast('Complete Google OAuth in the new tab, then click Google again to connect', 'info');
-            }
-        } catch (err) { toast('Could not get Google auth URL: ' + err.message, 'error'); }
+            const oauth2 = new google.accounts.oauth2.TokenClient({
+                client_id: GOOGLE_CLIENT_ID,
+                scope: 'https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly',
+                callback: (response) => {
+                    if (response.access_token) {
+                        this._saveGoogleToken(response.access_token);
+                    }
+                },
+                error_callback: (err) => {
+                    toast('Google OAuth failed: ' + (err.message || 'User cancelled'), 'error');
+                }
+            });
+            oauth2.requestAccessToken();
+        } catch (err) { toast('Google Sign-In not available: ' + err.message, 'error'); }
+    }
+
+    async _saveGoogleToken(accessToken) {
+        try {
+            // Get user info from Google
+            const resp = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+                headers: { 'Authorization': `Bearer ${accessToken}` }
+            });
+            const user = await resp.json();
+            // Save to local storage for the web app
+            localStorage.setItem('ct-google-token', accessToken);
+            localStorage.setItem('ct-google-user', JSON.stringify({ email: user.email, name: user.name }));
+            this.googleConnected = true;
+            this.googleUser = user;
+            this._renderIntegrations();
+            toast(`Connected to Google as ${user.email}`, 'success');
+        } catch (err) { toast('Failed to save Google token: ' + err.message, 'error'); }
     }
 
     async _handleMsOAuth() {
@@ -1292,23 +1338,31 @@ class App {
     }
 
     async connectGoogle() {
-        if (!this.token) { toast('Sign in first', 'error'); return; }
         if (this.googleConnected) {
             if (!confirm('Disconnect Google account?')) return;
-            try {
-                await this.api.post('/integrations/google/disconnect');
-                this.googleConnected = false;
-                this._renderIntegrations();
-                toast('Google disconnected', 'info');
-            } catch (err) { toast('Failed: ' + err.message, 'error'); }
+            localStorage.removeItem('ct-google-token');
+            localStorage.removeItem('ct-google-user');
+            this.googleConnected = false;
+            this.googleUser = null;
+            this.googleToken = null;
+            this._renderIntegrations();
+            toast('Google disconnected', 'info');
         } else {
             try {
-                const data = await this.api.get('/integrations/google/auth-url');
-                if (data?.url) {
-                    window.open(data.url, '_blank');
-                    toast('Complete Google OAuth in the new tab, then click Google again', 'info');
-                }
-            } catch (err) { toast('Failed: ' + err.message, 'error'); }
+                const oauth2 = new google.accounts.oauth2.TokenClient({
+                    client_id: GOOGLE_CLIENT_ID,
+                    scope: 'https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly',
+                    callback: (response) => {
+                        if (response.access_token) {
+                            this._saveGoogleToken(response.access_token);
+                        }
+                    },
+                    error_callback: (err) => {
+                        toast('Google OAuth failed: ' + (err.message || 'User cancelled'), 'error');
+                    }
+                });
+                oauth2.requestAccessToken();
+            } catch (err) { toast('Google Sign-In not available: ' + err.message, 'error'); }
         }
     }
 
@@ -1334,12 +1388,37 @@ class App {
     }
 
     async syncGoogleCalendar() {
-        if (!this.googleConnected) { toast('Connect Google first', 'error'); return; }
+        if (!this.googleConnected || !this.googleToken) { toast('Connect Google first', 'error'); return; }
         try {
-            const result = await this.api.post('/integrations/google/calendar/sync');
-            const count = (result && result.synced) || 0;
-            toast(`Synced ${count} events from Google Calendar`, 'success');
-            await this._loadAll();
+            const now = new Date();
+            const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+            const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59).toISOString();
+            const resp = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${start}&timeMax=${end}&singleEvents=true&orderBy=startTime`, {
+                headers: { 'Authorization': `Bearer ${this.googleToken}` }
+            });
+            const data = await resp.json();
+            if (data.error) throw new Error(data.error.message);
+            const events = data.items || [];
+            toast(`Fetched ${events.length} events from Google Calendar`, 'success');
+            // Merge with local events
+            for (const gEvent of events) {
+                const exists = this.events.find(e => e.external_id === gEvent.id);
+                if (!exists) {
+                    const ev = {
+                        id: `g_${gEvent.id}`,
+                        title: gEvent.summary || 'Untitled',
+                        description: gEvent.description || '',
+                        location: gEvent.location || '',
+                        start_time: gEvent.start?.dateTime || gEvent.start?.date,
+                        end_time: gEvent.end?.dateTime || gEvent.end?.date,
+                        color: '#4dabf7',
+                        source: 'google',
+                        external_id: gEvent.id
+                    };
+                    this.events.push(ev);
+                }
+            }
+            this._renderCalendar();
         } catch (err) { toast('Sync failed: ' + err.message, 'error'); }
     }
 

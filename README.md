@@ -4,7 +4,7 @@ A Google Calendar / Microsoft Calendar style app with task management, notes, an
 
 ![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
 ![CustomTkinter](https://img.shields.io/badge/CustomTkinter-5.2+-green.svg)
-![Status](https://img.shields.io/badge/Status-Development-orange)
+![Version](https://img.shields.io/badge/v0.5.0-Development-orange)
 
 🌐 **[Try Web Version →](https://candydoggy.github.io/calendar-tasks-cqwen/)**
 
